@@ -1,0 +1,23 @@
+# ---- Derleme ciktilari ------------------------------------------------------
+# Bunlar kaynaktan uretilir; depoda durmalarinin anlami yok.
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+
+# ---- ST belgeleri -----------------------------------------------------------
+# docs/ altindaki PDF'ler depoya konmadi: toplam ~54 MB ve ST'nin telifli
+# belgeleri. Indirmek icin:  bash docs/indir.sh
+#
+# Basindaki "**/" onemli: slash iceren bir desen, .gitignore'un bulundugu
+# dizine gore SABITLENIR. Yani sade "docs/*.pdf" yalnizca kokteki docs/
+# klasorunu kapsardi, test_i2c/docs/ altindakileri KACIRIRDI.
+**/docs/*.pdf
+
+# ---- Editor / isletim sistemi ----------------------------------------------
+.vscode/
+*.swp
+*~
+.DS_Store
