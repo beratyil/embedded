@@ -21,3 +21,9 @@
 *.swp
 *~
 .DS_Store
+
+# Makefile ayar izleyicisi (bkz. test_arducam_ov2640 Makefile)
+.ayarlar
+
+# Yakalanan goruntuler (uretilen veri, depoya girmez)
+goruntuler/
