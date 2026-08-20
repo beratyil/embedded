@@ -78,6 +78,49 @@ oku → doğrula. Tur başına **3 I2C işlemi**.
 her iki tarafta dahili pull-up açık (`PUPDR=01`), paralelde ~20 kΩ, kısa
 jumper'larla `t_r` ~840 ns < 1000 ns sınırı. Sahada 0 hata ile doğrulandı.
 
+### `test_arducam_ov2640/` — iki kamera, tek Nucleo ✅ çalışıyor
+
+NUCLEO-L476RG'ye **iki ArduCAM Mini 2MP** (OV2640 sensör + ArduChip CPLD +
+AL422B FIFO). Topoloji ArduCAM'in kendi donanım notundan (§2.2, Şekil 3):
+**I2C ve SPI ortak, yalnızca CS ayrı.** Toplam 9 tel, hepsi CN5 üzerinde.
+
+| Sinyal | Pin | Konnektör |
+|---|---|---|
+| `SCL` / `SDA` — ortak | PB8 / PB9 | CN5-10 / CN5-9 (AF4) |
+| `SCK` / `MISO` / `MOSI` — ortak | PA5 / PA6 / PA7 | CN5-6 / CN5-5 / CN5-4 (AF5) |
+| `CS` kamera 0 / kamera 1 — **ayrı** | PB6 / PC7 | CN5-3 / CN5-2 (GPIO) |
+| `+5V` / `GND` | — | CN6-5 / CN6-6 |
+
+**Adres çakışması neden sorun değil:** OV2640'ın SCCB adresi fabrikada
+sabittir (`0x30`, 7-bit; adres seçme pini yok) ve iki sensör aynı hatta.
+Ama I2C yalnızca *sensörü ayarlar* ve ikisine **aynı** ayarı istiyoruz →
+tek yazma ikisine birden gider (yayın), ikisi de ACK çeker, açık drenajda
+sorunsuz. Asıl iş (yakalama tetiği, FIFO okuma) SPI'da ve CS ayrı olduğu
+için kamera başına bağımsız.
+
+> **Bedeli:** I2C okuması hatta kaç sensör olduğunu SÖYLEMEZ (ikisi de aynı
+> değeri sürer). Bu yüzden *kamera varlık testi I2C'den değil SPI'dan*
+> yapılır — ArduChip `0x00`'a `0x55`/`0xAA` yaz-oku.
+> **Sınırı:** iki kameraya farklı ayar verilemez. Gerekirse ikinciyi I2C3'e
+> (PC0/PC1, CN8-6/CN8-5) alın.
+
+**Saat:** SYSCLK = HSI16 = 16 MHz. Sebep: SPI'ın en hızlı bölmesi PCLK/2'dir
+ve bu, ArduChip'in tavanı olan 8 MHz'e tam oturur. 16 MHz'de Flash 0
+wait-state ister, ayar gerekmez (RM0351 Tablo 11).
+
+Sürücünün tamamı **yoklamalı**, kesme yok. Görüntü RAM'de tamponlanmaz —
+FIFO'dan bayt okunup doğrudan UART'a yazılır; darboğaz UART olduğu için
+640x480 bile 128 KB SRAM'i zorlamaz.
+
+**Neden Nucleo:** Discovery'nin VCP'si MCU'ya bağlı değil (bkz. §6), yani
+görüntüyü dışarı verecek yolu yok. F407'nin DCMI'ı olsa da ArduCAM Mini
+paralel veri yolunu dışarı vermiyor; DCMI için çıplak OV2640 (24 pin DVP)
+modülü gerekir.
+
+**Durum:** tek kamerayla uçtan uca doğrulandı — geçerli 320x240 baseline
+JPEG, tanınabilir fotoğraf. İkinci kamera besleme sorunu nedeniyle bekliyor
+(kod tek kamerayla da çalışacak şekilde yazıldı).
+
 ## 5. Komutlar
 
 ```bash
@@ -89,6 +132,16 @@ make flash-master    # yalnızca Discovery
 make monitor         # Nucleo UART log'u (115200)
 make probe           # bağlı ST-Link'leri listele
 make clean
+```
+
+```bash
+cd test_arducam_ov2640
+make flash                    # Nucleo'ya yükle
+make monitor                  # teşhis çıktısı (4 aşamalı rapor)
+make yakala                   # görüntüleri .jpg kaydet (tools/jpeg_al.py)
+make COZUNURLUK=640 flash     # 160 / 320 (varsayılan) / 640
+make GORUNTU_AKISI=1 flash    # ham JPEG'i UART'a dök
+make BAUD=460800 flash        # hızlı akış (BAUD hem koda hem monitor'a gider)
 ```
 
 ## 6. Ortam tuzakları (zor yoldan öğrenildi)
@@ -117,10 +170,34 @@ VCP uçları U2 pin 12/13, F407'nin USART'ına gitmiyor). Discovery'de `printf`
 istenirse: harici USB-TTL dongle (`P1-14`=PA2, `P1-13`=PA3) veya SWO/ITM
 (`SB12` köprüsüne bağlı, `st-trace` kurulu). Nucleo'da VCP normal çalışır.
 
+**`make` derleyici bayrağı değişimini YAKALAMAZ.** Yalnızca dosya zaman
+damgalarına bakar; `main.c` değişmediyse `make COZUNURLUK=640` yeni `-D`
+bayraklarına rağmen yeniden derlemez ve **sessizce eski binary'yi** yükler.
+Bu tuzağa sahada düşüldü (`GORUNTU_AKISI=1` yüklendi sanıldı, kart eski
+kodu çalıştırıyordu). Çözüm `test_arducam_ov2640/l476rg_nucleo/Makefile`
+içinde: bayraklar `.ayarlar` dosyasına yazılır, `.o` ona bağımlı yapılır.
+**Parametreli yeni bir Makefile yazarken aynısını yapın.**
+
+**Üst Makefile'da `export DEGISKEN` YAZMAYIN.** Komut satırı değişkenleri
+alt make'e `MAKEFLAGS` ile zaten geçer. Dahası `export`, değişken
+verilmediğinde onu **boş değer** olarak ortama koyar; alt Makefile'daki
+`?=` "zaten tanımlı" görüp varsayılanı atlar ve `-DX=` gibi bozuk bir
+tanım üretir. Sonuç anlaşılması zor bir ön işlemci hata yığınıdır.
+
+**Çevre birimi kartı USB enumerasyonunu düşürebilir.** ArduCAM takılıyken
+Nucleo `lsusb`'de görünüyor ama `st-info` bulamıyordu. Ayırt edici işaret:
+`/sys/bus/usb/devices/1-1/bConfigurationValue` **boş**, arayüz dizini yok.
+Descriptor okuma 100 mA'lik varsayılan durumda çalışır; `SET_CONFIGURATION`
+cihazı Nucleo'nun descriptor'ındaki 300 mA'e geçirir ve orada düşer. Yani
+"kart görünüyor ama programlanamıyor" = **besleme**, kablo veya izin değil.
+Tek kameranın bile düşürmesi normal değildir; kısa devre/yanlış tel arayın.
+
 ## 7. Belgelerle doğrulanmış gerçekler
 
-`docs/` boş gelir; `bash docs/indir.sh` ile ST'den indirilir (repoya konmadı:
-54 MB ve ST telifli).
+Belgeler **`test_i2c/docs/`** altındadır (kökte `docs/` yok). Boş gelir;
+`bash test_i2c/docs/indir.sh` ile ST'den indirilir (repoya konmadı: 54 MB
+ve ST telifli). ArduCAM belgesi ayrı, `wget` ile:
+`blog.arducam.com/downloads/shields/ArduCAM_Mini_2MP_Camera_Shield_Hardware_Application_Note.pdf`
 
 | Gerçek | Kaynak |
 |---|---|
@@ -131,9 +208,41 @@ istenirse: harici USB-TTL dongle (`P1-14`=PA2, `P1-13`=PA3) veya SWO/ITM
 | Discovery `PB6`→kart "SCL" neti (CS43L22), `PB7`→serbest, `PB9`→"SDA" neti | UM1472 pin tablosu |
 | F407 `PB6`=I2C1_SCL, `PB7`=I2C1_SDA (AF4) | DS8626 pin tanım tablosu |
 | F4 çok baytlı okuma reçeteleri (1/2/3+ bayt) | AN2824 (başlığı F10x der, I2C v1 IP aynı) |
+| SPI1 tabanı `0x40013000`; `RCC_APB2ENR` ofset `0x60`, `SPI1EN` bit 12 | RM0351 Tablo 1, §6.4.21 |
+| `SPI_CR2`: `FRXTH` bit 12, `DS[3:0]` bit 11:8 · `SPI_CR1`: `BR[2:0]` bit 5:3 | RM0351 §42.6.1-2 |
+| `I2C_CR2`: `AUTOEND` 25, `NBYTES` 23:16, `START` 13, `RD_WRN` 10 | RM0351 §39.7.2 |
+| HCLK ≤ 16 MHz → **0 wait state** (VCORE Range 1) | RM0351 Tablo 11 |
+| L476 `PA5`=`TT_a` (**yalnız 3.6V**) · `PA6`/`PA7`=`FT_la` · `PB8`/`PB9`=`FT_fl` · `PC7`=`FT_l` | DS10198 Tablo 16 |
+| Nucleo `PA5`=D13, `PA6`=D12, `PA7`=D11, `PB6`=D10, `PC7`=D9 | UM1724 Tablo 23 |
+| USB'den **300 mA** sınırı (JP1 OFF) · `E5V` (CN7-6) 500 mA · harici için JP5 pin 2-3 | UM1724 §7.5.2-7.5.4 |
+| Nucleo'da `+5V` CN6-5 ile CN7-18 **aynı nettir** (ikisine bağlamak bütçeyi bölmez) | UM1724 §7.5.4 |
+| ArduChip register tablosu · SPI mode 0 · azami 8 MHz | ArduCAM-M-2MP Hardware Application Note §4-6 |
+| OV2640 SCCB adresi sabit `0x60`/`0x61` (7-bit `0x30`) | aynı belge §3 |
+| Çoklu kamera: I2C+SPI ortak, yalnızca CS ayrı | aynı belge §2.2, Şekil 3 |
 
-**Yeni bir register değeri veya pin iddiası eklemeden önce `docs/` altındaki
-belgeden doğrula.** Bu depodaki her sayı böyle doğrulandı.
+**Yeni bir register değeri veya pin iddiası eklemeden önce belgeden
+doğrula.** Bu depodaki her sayı böyle doğrulandı.
+
+### Belge de yanılır — ölçümle çelişirse ölçüm kazanır
+
+ArduCAM donanım notu (Rev 1.0, 2015) ArduChip'in **ilk** revizyonunu
+anlatıyor. Elimizdeki modül daha yeni (sürüm register'ı `0x40` yerine
+`0x73`). Sahada ölçümle bulunan üç sapma:
+
+| Belge / referans kod ne diyor | Gerçek (ölçüldü) |
+|---|---|
+| Burst okumada ilk bayt kukladır (§5.3) | **Kukla yok**; atmak JPEG'in ilk baytını yutuyor |
+| `0x03` bit1 VSYNC kutupluğu; ArduCAM kütüphanesi `0x02` yazar | Bu modülde `0x02` yakalamayı **öldürüyor** (FIFO 8 baytta kalıyor); bit1 **temiz** olmalı |
+| `0x07` diye bir register yok (Tablo 1) | Yeni revizyon açılışta **CPLD reset'i** ister: `0x80` → 100 ms → `0x00` → 100 ms |
+
+Ayrıca: **FIFO uzunluğu JPEG boyutu değildir.** `N*1024 + 8` kalıbına
+yuvarlanır, fark dolgu baytıdır (ölçüm: bildirilen 3080, gerçek JPEG 2264).
+FIFO'dan bildirilen kadar okumak doğru, ama dosyaya yazarken `FF D9`'da
+kesmek gerekir.
+
+Ve `ov2640_regs.h`: değerlerin çoğu OV2640'ın **DSP bankasına** ait, OmniVision
+bunu yayınlamamış. Deponun "her sayıyı belgeden doğrula" kuralının
+uygulanamadığı tek yer — dosyanın başında açıkça yazılı, dokunmayın.
 
 ## 8. Doğrulama tekniği (donanım olmadan test edilemeyen kod için)
 
@@ -150,7 +259,30 @@ od -An -tx1 x.bin
 10 saniyede `toplam_islem=60`, `ECHO=21`, `hata_sayisi=0` çıkması sistemin
 uçtan uca çalıştığını kanıtlar (20 tur × 3 işlem = 60).
 
+**Belirsiz bir register değerini tara, tahmin etme.** ArduChip `0x03`'te
+hangi bit kombinasyonunun doğru olduğu bilinmiyordu. Sekiz adayı sırayla
+yazıp her birinde yakalama yapan ve FIFO uzunluğunu raporlayan geçici bir
+aşama eklendi; desen **tek turda** tek bite indi. Tahmin edip her seferinde
+yeniden yüklemekten kat kat hızlı. Tarama işini bitirince kaldırılır, bulgu
+yoruma yazılır.
+
+**Ayırt edici ölçüm ekle.** Aynı belirti farklı sebeplerden gelir ve rapor
+hepsinde aynı görünür. Örnek: "FIFO boş" hem *sensör hiç kare üretmiyor*
+hem de *üretiyor ama FIFO yolu yanlış* durumunda aynıdır. ArduChip'in VSYNC
+bitini yoklayıp geçiş saymak ikisini ayırdı ve besleme/sensör hipotezini
+tek ölçümle eledi. Böyle bir ölçüm eklemek, birkaç tur tahmin yürütmekten
+ucuzdur.
+
+**Uçtan uca kanıtı donanımın kendisinden al.** Kamera projesinde yakalanan
+karenin ilk baytları UART'a basılır: `FF D8` (JPEG SOI) görülüyorsa
+bilgisayarda hiçbir şey çalıştırmadan tüm zincirin çalıştığı bilinir.
+Ayrıca dosya boyutu ışık göstergesidir (karanlıkta ~2 KB, aydınlıkta
+~6.5 KB) ve kareler arası boyut değişimi görüntünün donmadığını gösterir.
+
 ## 9. Araçlar
 
 `arm-none-eabi-gcc` 13.2.1 · `stlink-tools` 1.8.0 (`st-flash`, `st-info`,
-`st-util`, `st-trace`) · `pdftotext` (belge doğrulama için) · `wget`.
+`st-util`, `st-trace`) · `pdftotext` + `pdftoppm` (belge doğrulama; şekilleri
+görmek için sayfayı PNG'ye çevirmek gerekebilir) · `wget` · `python3`
+(**yalnızca stdlib** — host araçlarında dış bağımlılık yok, seri port
+`termios` ile açılır) · `file` (üretilen görüntüyü doğrulamak için).
