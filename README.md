@@ -23,6 +23,7 @@ kartı seri numarasından bulur.
 | [`test_blink/`](test_blink/) | LED yakıp söndürme, SysTick gecikme. Register kalıbının en sade hali; yeni proje yazarken startup ve linker script buradan kopyalanır. | ✅ |
 | [`test_i2c/`](test_i2c/) | İki kart arası I2C. Discovery master (I2C v1, yoklama), Nucleo slave (I2C v2, kesme). Aynı çekirdek, farklı çevre birimi kuşağı. | ✅ çalışıyor |
 | [`test_arducam_ov2640/`](test_arducam_ov2640/) | Tek Nucleo'ya **iki ArduCAM Mini 2MP** (OV2640). Ortak I2C + ortak SPI, yalnızca CS ayrı. | ✅ tek kamerayla çalışıyor (gerçek 320x240 JPEG fotoğraf) |
+| [`test_dht22_ssd1306/`](test_dht22_ssd1306/) | **DHT22** sıcaklık/nem → **SSD1306 OLED**. Tek telli zamanlama protokolü + sayfa düzenli video RAM. | 🔧 kod hazır, donanım testi bekliyor |
 
 ## Hızlı başlangıç
 

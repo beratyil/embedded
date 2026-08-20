@@ -121,6 +121,50 @@ modülü gerekir.
 JPEG, tanınabilir fotoğraf. İkinci kamera besleme sorunu nedeniyle bekliyor
 (kod tek kamerayla da çalışacak şekilde yazıldı).
 
+### `test_dht22_ssd1306/` — sensorden ekrana 🔧 donanim testi bekliyor
+
+NUCLEO-L476RG: **DHT22** okunur, deger **SSD1306 128x64 OLED**'e yazilir.
+Depodaki ilk **cikti cihazli** proje.
+
+| Sinyal | Pin | Konnektör |
+|---|---|---|
+| OLED `SCL` / `SDA` | PB8 / PB9 | CN5-10 / CN5-9 (AF4, I2C1) |
+| DHT22 `DATA` | PA10 | CN9-3 (D2) |
+| Besleme | 3V3 / GND | CN6-4 / CN6-6 |
+
+Her ikisi de **3V3**'ten beslenir → tüm mantık seviyeleri STM32 ile aynı,
+seviye çevirici yok. Toplam ~25 mA, besleme sorunu beklenmiyor.
+
+**DHT22 — zamanlama problemi.** Çipte bu protokolü yapan çevre birimi yok;
+her kenar yazılımla ölçülür. Bitin değeri HIGH süresinde saklı (26-28 µs =
+`0`, 70 µs = `1`, eşik 50 µs). Bunu güvenilir ölçmek için **TIM2 1 MHz'e
+bölünüp serbest bırakıldı**; ölçüm iki `CNT` okumasının farkı. Döngüde
+saymak derleyici optimizasyonuna bağımlı olurdu.
+
+> TIM2 özellikle seçildi: L4'te **TIM2 ve TIM5 32 bittir** (TIM3/TIM4 16 bit).
+> 32 bit sayaç 71 dakikada taşar; 16 bit olsa 65 ms'de taşardı.
+> `TIM2_EGR`'ye `UG` yazmak şart, yoksa prescaler gölge register'a yüklenmez
+> ve ilk ölçümler 16 kat yanlış çıkar.
+
+**DHT22 pini açık drenaj.** Protokol çift yönlü. `MODER`'i giriş/çıkış
+arasında değiştirmek yerine pin bir kez açık drenaj yapıldı: `ODR=0` hattı
+çeker, `ODR=1` bırakır, `IDR` her durumda gerçek hali okur.
+
+**SSD1306 — bellek düzeni problemi.** Video RAM satır değil **sayfa**
+düzeninde: bir bayt = üst üste 8 piksel. Font tablosu da aynı düzende
+seçildi (bayt = sütun), böylece karakterler bit döndürmeden yazılıyor.
+RAM'de 1024 baytlık çerçeve tamponu tutulup tek seferde gönderilir
+(titreme yok). Tek font, tam sayı ölçekle büyütülür (1x/2x/3x).
+
+> **TUZAK:** `I2C_CR2`'deki `NBYTES` 8 bittir → tek işlemde en fazla 255
+> bayt. 1024 baytlık çerçeve sığmaz; sayfa sayfa gönderilir (8 × 129 bayt).
+
+Kayan nokta yok: DHT22 değerleri zaten onda bir çözünürlükte tam sayı.
+
+**Belgelenemeyen tek nokta:** negatif sıcaklığın *işaret + büyüklük*
+kodlaması (ikiye tümleyen değil) elimizdeki datasheet sürümünde yazmıyor.
+Kodda açıkça işaretli.
+
 ## 5. Komutlar
 
 ```bash
@@ -132,6 +176,13 @@ make flash-master    # yalnızca Discovery
 make monitor         # Nucleo UART log'u (115200)
 make probe           # bağlı ST-Link'leri listele
 make clean
+```
+
+```bash
+cd test_dht22_ssd1306
+make flash                    # Nucleo'ya yukle
+make monitor                  # UART ciktisi
+make ARALIK=5000 flash        # olcum araligi ms (asgari 2000, #error korumali)
 ```
 
 ```bash
